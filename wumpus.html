@@ -279,12 +279,18 @@ class WumpusWorld {
 let world = new WumpusWorld();
 let autoplayInterval = null;
 let agentImages = [];
+let goldImage;
+let wumpusImage;
+let pitImage;
 
 function preload() {
   agentImages[0] = loadImage('right.png');
   agentImages[1] = loadImage('front.png');
   agentImages[2] = loadImage('left.png');
   agentImages[3] = loadImage('up.png');
+  goldImage = loadImage('gold.png');
+  wumpusImage = loadImage('wumpus.png');
+  pitImage = loadImage('pit.png');
 }
 
 function setup() {
@@ -336,15 +342,12 @@ function draw() {
             noFill();
             rect(x, y, sz, sz);
 
-            // Real Content (Only if visible or visited)
-            if (r === world.agent_x && c === world.agent_y) {
-                textSize(20);
-                textFont('sans-serif');
-                fill(0);
+            // Real Content (for visited cells)
+            if (world.agent.hasFact('V', r, c)) {
                 let items = world.grid[r][c];
-                if (items.includes('P')) text("PIT", x+5, y+25);
-                if (items.includes('W')) text("WUMP", x+5, y+45);
-                if (items.includes('G') && !world.has_gold) text("GOLD", x+5, y+65);
+                if (items.includes('P')) image(pitImage, x + 25, y + 25, 50, 50);
+                if (items.includes('W')) image(wumpusImage, x + 25, y + 25, 50, 50);
+                if (items.includes('G') && !world.has_gold) image(goldImage, x + 25, y + 25, 50, 50);
             }
 
             // Show percepts for visited cells

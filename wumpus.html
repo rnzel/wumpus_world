@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wumpus World Logical Agent</title>
+    <style>
+        body { font-family: sans-serif; background: #f0f0f0; display: flex; justify-content: center; padding: 20px; }
+        #game-container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; gap: 20px; }
+        canvas { border: 2px solid #333; background: #c8c8c8; }
+        #sidebar { width: 350px; display: flex; flex-direction: column; gap: 10px; }
+        .stats-box { background: #eee; padding: 10px; border-radius: 4px; }
+        .log-box { flex-grow: 1; background: #333; color: #0f0; padding: 10px; font-family: monospace; font-size: 12px; height: 150px; overflow-y: auto; border-radius: 4px; }
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+        button { padding: 8px; cursor: pointer; background: #2060ff; color: white; border: none; border-radius: 4px; }
+        button:hover { background: #1040cc; }
+        button.danger { background: #d9534f; }
+        button.success { background: #5cb85c; }
+    </style>
+</head>
+<body>
+
+<!-- Game container holding the canvas and sidebar -->
+<div id="game-container">
+    <!-- Canvas for rendering the 4x4 grid world -->
+    <canvas id="wumpusCanvas" width="400" height="400"></canvas>
+
+    <!-- Sidebar with game stats, action log, and control buttons -->
+    <div id="sidebar">
+        <div class="stats-box">
+            <h3 style="margin-top:0">Agent Status</h3>
+            <div id="status">Status: Alive</div>
+            <div id="score">Score: 0</div>
+            <div id="wumpus-status">Wumpus: Alive</div>
+            <div id="gold-status">Gold: No</div>
+            <div id="arrows">Arrows: 1</div>
+            <hr>
+            <div id="percepts">Percepts: None</div>
+        </div>
+
+        <div class="log-box" id="log">--- NEW WORLD GENERATED ---</div>
+
+        <div class="controls">
+            <button onclick="manualAction('MoveForward')">Forward (↑)</button>
+            <button onclick="manualAction('Shoot')">Shoot (S)</button>
+            <button onclick="manualAction('TurnLeft')">Left (←)</button>
+            <button onclick="manualAction('TurnRight')">Right (→)</button>
+            <button onclick="manualAction('Grab')">Grab Gold (G)</button>
+            <button onclick="manualAction('Climb')">Climb Out (C)</button>
+            <button class="success" id="autoBtn" onclick="toggleAutoplay()">Auto-Play (A)</button>
+            <button class="danger" onclick="resetGame()">Reset (R)</button>
+        </div>
+    </div>
+</div>
+
+<script>
+/** * LOGIC CORE
+ */
+/** * Agent class with knowledge base and decision making */
+class WumpusAgent {
+    constructor() {
+        this.kb = new Set();
+        this.resetState();
+    }
+
+    resetState() {
+        this.agent_x = 3;
+        this.agent_y = 0;
+        this.direction = 0;
+        this.has_gold = false;
+        this.kb.clear();
+        this.addFact('V', 3, 0);
+        this.addFact('OK', 3, 0);
+        this.addFact('~P', 3, 0);
+        this.addFact('~W', 3, 0);
+    }
+
+    addFact(type, r, c) { this.kb.add(`${type},${r},${c}`); }
+    hasFact(type, r, c) { return this.kb.has(`${type},${r},${c}`); }
+    removeFact(type, r, c) { this.kb.delete(`${type},${r},${c}`); }
+
+    getNeighbors(r, c) {
+        let adj = [[r, c + 1], [r + 1, c], [r, c - 1], [r - 1, c]];
+        return adj.filter(([nr, nc]) => nr >= 0 && nr < 4 && nc >= 0 && nc < 4);
+    }
+
+    tellKB(percepts, r, c) {
+        this.agent_x = r; this.agent_y = c;
+        this.addFact('V', r, c);
+        
+        if (percepts.has('Breeze')) { this.addFact('B', r, c); this.removeFact('~B', r, c); }
+        else { this.addFact('~B', r, c); this.removeFact('B', r, c); }
+
+        if (percepts.has('Stench')) { this.addFact('S', r, c); this.removeFact('~S', r, c); }
+        else { this.addFact('~S', r, c); this.removeFact('S', r, c); }
+
+        if (percepts.has('Glitter')) this.addFact('G', r, c);
+    }
+
+    inferSafety() {
+        for (let r = 0; r < 4; r++) {
+            for (let c = 0; c < 4; c++) {
+                if (this.hasFact('V', r, c)) {
+                    let neighbors = this.getNeighbors(r, c);
+                    if (this.hasFact('~B', r, c)) neighbors.forEach(([nr, nc]) => this.addFact('~P', nr, nc));
+                    if (this.hasFact('~S', r, c)) neighbors.forEach(([nr, nc]) => this.addFact('~W', nr, nc));
+                }
+            }
+        }
+        for (let r = 0; r < 4; r++) {
+            for (let c = 0; c < 4; c++) {
+                if (this.hasFact('~P', r, c) && this.hasFact('~W', r, c)) this.addFact('OK', r, c);
+            }
+        }
+    }
+
+    chooseAction(percepts) {
+        if (percepts.has('Glitter')) { this.has_gold = true; return 'Grab'; }
+        if (this.has_gold && this.agent_x === 3 && this.agent_y === 0) return 'Climb';
+
+        // Find safe unvisited
+        let neighbors = this.getNeighbors(this.agent_x, this.agent_y);
+        let target = null;
+        for (let [nr, nc] of neighbors) {
+            if (this.hasFact('OK', nr, nc) && !this.hasFact('V', nr, nc)) {
+                target = [nr, nc]; break;
+            }
+        }
+
+        if (!target && this.has_gold) {
+            // Path back to start
+            let safeVisited = neighbors.filter(([nr, nc]) => this.hasFact('OK', nr, nc));
+            if (safeVisited.length > 0) {
+                target = safeVisited.sort((a, b) => (Math.abs(a[0]-3)+a[1]) - (Math.abs(b[0]-3)+b[1]))[0];
+            }
+        }
+
+        if (target) {
+            let [tr, tc] = target;
+            let dr = tr - this.agent_x, dc = tc - this.agent_y;
+            let targetDir = -1;
+            if (dr === -1 && dc === 0) targetDir = 3;
+            else if (dr === 1 && dc === 0) targetDir = 1;
+            else if (dr === 0 && dc === 1) targetDir = 0;
+            else if (dr === 0 && dc === -1) targetDir = 2;
+
+            let diff = (targetDir - this.direction + 4) % 4;
+            if (diff === 0) return 'MoveForward';
+            if (diff === 1) return 'TurnRight';
+            if (diff === 3) return 'TurnLeft';
+            return 'TurnRight';
+        }
+
+        return 'TurnLeft'; 
+    }
+}
+
+/** * World class managing the 4x4 grid, agent position, and game state */
+class WumpusWorld {
+    constructor() {
+        this.agent = new WumpusAgent();
+        this.setupWorld();
+    }
+
+    /** * Initializes the 4x4 grid with pits, wumpus, and gold randomly placed */
+    setupWorld() {
+        // Initialize empty 4x4 grid
+        this.grid = Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => []));
+        this.agent_x = 3; this.agent_y = 0;
+        this.direction = 0; this.arrows = 1; this.score = 0;
+        this.alive = true; this.has_gold = false; this.wumpus_alive = true;
+        this.won = false; this.scream = false;
+
+        let positions = [];
+        for(let r=0; r<4; r++) for(let c=0; c<4; c++) if(!(r===3 && c===0)) positions.push([r,c]);
+
+        // Pits
+        positions = positions.filter(p => {
+            if (Math.random() < 0.2) { this.grid[p[0]][p[1]].push('P'); return false; }
+            return true;
+        });
+        // Wumpus
+        let wPos = positions.splice(Math.floor(Math.random()*positions.length), 1)[0];
+        this.grid[wPos[0]][wPos[1]].push('W');
+        // Gold
+        let gPos = positions.splice(Math.floor(Math.random()*positions.length), 1)[0];
+        this.grid[gPos[0]][gPos[1]].push('G');
+
+        this.agent.resetState();
+    }
+
+    getPercepts(r, c) {
+        let p = new Set();
+        if (this.grid[r][c].includes('G') && !this.has_gold) p.add('Glitter');
+        let adj = [[r, c+1], [r+1, c], [r, c-1], [r-1, c]];
+        adj.forEach(([nr, nc]) => {
+            if (nr>=0 && nr<4 && nc>=0 && nc<4) {
+                if (this.grid[nr][nc].includes('P')) p.add('Breeze');
+                if (this.grid[nr][nc].includes('W') && this.wumpus_alive) p.add('Stench');
+            }
+        });
+        if (this.scream) p.add('Scream');
+        return p;
+    }
+
+    processAction(action) {
+        if (!this.alive) return [new Set(), "Game Over"];
+        this.scream = false;
+        let msg = "Agent performed: " + action;
+
+        if (action === 'MoveForward') {
+            let dr = [0, 1, 0, -1][this.direction];
+            let dc = [1, 0, -1, 0][this.direction];
+            let nr = this.agent_x + dr, nc = this.agent_y + dc;
+            if (nr>=0 && nr<4 && nc>=0 && nc<4) {
+                this.agent_x = nr; this.agent_y = nc;
+                this.agent.agent_x = nr; this.agent.agent_y = nc;
+                if (this.grid[nr][nc].includes('P')) { this.alive = false; this.score -= 1000; msg = "Fell into Pit!"; }
+                else if (this.grid[nr][nc].includes('W') && this.wumpus_alive) { this.alive = false; this.score -= 1000; msg = "Eaten by Wumpus!"; }
+            } else msg = "Bumped into wall";
+        } 
+        else if (action === 'TurnLeft') { this.direction = (this.direction + 3) % 4; this.agent.direction = this.direction; }
+        else if (action === 'TurnRight') { this.direction = (this.direction + 1) % 4; this.agent.direction = this.direction; }
+        else if (action === 'Grab') {
+            if (this.grid[this.agent_x][this.agent_y].includes('G')) {
+                this.has_gold = true; this.agent.has_gold = true;
+                msg = "Grabbed Gold!";
+            }
+        }
+        else if (action === 'Shoot') {
+            if (this.arrows > 0) {
+                this.arrows--; this.score -= 10;
+                // Simplified shoot logic
+                msg = "Shot missed";
+            }
+        }
+        else if (action === 'Climb') {
+            if (this.agent_x === 3 && this.agent_y === 0) {
+                if (this.has_gold) { this.score += 1000; this.won = true; }
+                this.alive = false; msg = "Climbed out!";
+            }
+        }
+
+        if (action !== 'Climb') this.score--;
+        return [this.getPercepts(this.agent_x, this.agent_y), msg];
+    }
+}
+
+/** * UI RENDERING 
+ */
+const canvas = document.getElementById('wumpusCanvas');
+const ctx = canvas.getContext('2d');
+let world = new WumpusWorld();
+let autoplayInterval = null;
+
+function updateUI(msg) {
+    document.getElementById('score').innerText = `Score: ${world.score}`;
+    document.getElementById('status').innerText = `Status: ${world.alive ? (world.won ? "Winner!" : "Alive") : "Dead/Exited"}`;
+    document.getElementById('wumpus-status').innerText = `Wumpus: ${world.wumpus_alive ? "Alive" : "Dead"}`;
+    document.getElementById('gold-status').innerText = `Gold: ${world.has_gold ? "Yes" : "No"}`;
+    document.getElementById('arrows').innerText = `Arrows: ${world.arrows}`;
+    
+    let p = world.getPercepts(world.agent_x, world.agent_y);
+    document.getElementById('percepts').innerText = `Percepts: ${Array.from(p).join(', ') || 'None'}`;
+
+    if (msg) {
+        let log = document.getElementById('log');
+        log.innerHTML += `<br>> ${msg}`;
+        log.scrollTop = log.scrollHeight;
+    }
+    draw();
+}
+
+function draw() {
+    ctx.clearRect(0, 0, 400, 400);
+    const sz = 100;
+
+    for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 4; c++) {
+            let x = c * sz; let y = r * sz;
+            
+            // Background color based on KB
+            let color = "#c8c8c8";
+            if (world.agent.hasFact('V', r, c)) color = "#c8dcff";
+            if (world.agent.hasFact('OK', r, c)) color = "#96ff96";
+            if (r === world.agent_x && c === world.agent_y) color = "#ffff64";
+
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, sz, sz);
+            ctx.strokeStyle = "#000";
+            ctx.strokeRect(x, y, sz, sz);
+
+            // Symbols
+            ctx.fillStyle = "#505050";
+            ctx.font = "12px sans-serif";
+            if (world.agent.hasFact('~W', r, c)) ctx.fillText("~W", x+5, y+sz-20);
+            if (world.agent.hasFact('~P', r, c)) ctx.fillText("~P", x+30, y+sz-20);
+
+            // Real Content (Only if visible or visited)
+            if (r === world.agent_x && c === world.agent_y) {
+                ctx.font = "20px sans-serif";
+                let items = world.grid[r][c];
+                if (items.includes('P')) ctx.fillText("PIT", x+5, y+25);
+                if (items.includes('W')) ctx.fillText("WUMP", x+5, y+45);
+                if (items.includes('G') && !world.has_gold) ctx.fillText("GOLD", x+5, y+65);
+            }
+        }
+    }
+
+    // Draw Agent Arrow
+    let ax = world.agent_y * sz + 50;
+    let ay = world.agent_x * sz + 50;
+    ctx.save();
+    ctx.translate(ax, ay);
+    ctx.rotate(world.direction * Math.PI / 2);
+    ctx.beginPath();
+    ctx.moveTo(15, 0); ctx.lineTo(-10, -10); ctx.lineTo(-10, 10); ctx.closePath();
+    ctx.fillStyle = "black";
+    ctx.fill();
+    ctx.restore();
+}
+
+function manualAction(act) {
+    if (!world.alive) return;
+    let [p, msg] = world.processAction(act);
+    world.agent.tellKB(p, world.agent_x, world.agent_y);
+    world.agent.inferSafety();
+    updateUI(msg);
+}
+
+function resetGame() {
+    world.setupWorld();
+    document.getElementById('log').innerHTML = "--- NEW WORLD GENERATED ---";
+    let p = world.getPercepts(world.agent_x, world.agent_y);
+    world.agent.tellKB(p, world.agent_x, world.agent_y);
+    world.agent.inferSafety();
+    updateUI();
+}
+
+function toggleAutoplay() {
+    if (autoplayInterval) {
+        clearInterval(autoplayInterval);
+        autoplayInterval = null;
+        document.getElementById('autoBtn').innerText = "Auto-Play (A)";
+    } else {
+        document.getElementById('autoBtn').innerText = "Stop (A)";
+        autoplayInterval = setInterval(() => {
+            if (!world.alive) { toggleAutoplay(); return; }
+            let p = world.getPercepts(world.agent_x, world.agent_y);
+            let act = world.agent.chooseAction(p);
+            manualAction(act);
+        }, 500);
+    }
+}
+
+// Key bindings
+window.addEventListener('keydown', e => {
+    if (e.key === 'ArrowUp') manualAction('MoveForward');
+    if (e.key === 'ArrowLeft') manualAction('TurnLeft');
+    if (e.key === 'ArrowRight') manualAction('TurnRight');
+    if (e.key === 'g') manualAction('Grab');
+    if (e.key === 's') manualAction('Shoot');
+    if (e.key === 'c') manualAction('Climb');
+    if (e.key === 'r') resetGame();
+    if (e.key === 'a') toggleAutoplay();
+});
+
+resetGame();
+</script>
+</body>
+</html>

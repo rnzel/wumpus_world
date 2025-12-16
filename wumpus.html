@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Wumpus World Logical Agent</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
     <style>
         body { font-family: sans-serif; background: #f0f0f0; display: flex; justify-content: center; padding: 20px; }
         #game-container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; gap: 20px; }
@@ -22,8 +23,8 @@
 
 <!-- Game container holding the canvas and sidebar -->
 <div id="game-container">
-    <!-- Canvas for rendering the 4x4 grid world -->
-    <canvas id="wumpusCanvas" width="400" height="400"></canvas>
+    <!-- Div for p5.js canvas -->
+    <div id="wumpusCanvas"></div>
 
     <!-- Sidebar with game stats, action log, and control buttons -->
     <div id="sidebar">
@@ -273,12 +274,23 @@ class WumpusWorld {
     }
 }
 
-/** * UI RENDERING 
+/** * UI RENDERING
  */
-const canvas = document.getElementById('wumpusCanvas');
-const ctx = canvas.getContext('2d');
 let world = new WumpusWorld();
 let autoplayInterval = null;
+let agentImages = [];
+
+function preload() {
+  agentImages[0] = loadImage('right.png');
+  agentImages[1] = loadImage('front.png');
+  agentImages[2] = loadImage('left.png');
+  agentImages[3] = loadImage('up.png');
+}
+
+function setup() {
+  createCanvas(400, 400).parent('wumpusCanvas');
+  noLoop();
+}
 
 /** * Updates the UI elements with current game state and logs messages */
 function updateUI(msg) {
@@ -290,7 +302,7 @@ function updateUI(msg) {
     document.getElementById('wumpus-status').innerText = `Wumpus: ${world.wumpus_alive ? "Alive" : "Dead"}`;
     document.getElementById('gold-status').innerText = `Gold: ${world.has_gold ? "Yes" : "No"}`;
     document.getElementById('arrows').innerText = `Arrows: ${world.arrows}`;
-    
+
     let p = world.getPercepts(world.agent_x, world.agent_y);
     document.getElementById('percepts').innerText = `Percepts: ${Array.from(p).join(', ') || 'None'}`;
 
@@ -299,61 +311,59 @@ function updateUI(msg) {
         log.innerHTML += `<br>> ${msg}`;
         log.scrollTop = log.scrollHeight;
     }
-    draw();
+    redraw();
 }
 
 /** * Renders the 4x4 grid cells with colors, symbols, content, and the agent */
 function draw() {
-    ctx.clearRect(0, 0, 400, 400);
+    background('#c8c8c8');
     const sz = 100;
 
     for (let r = 0; r < 4; r++) {
         for (let c = 0; c < 4; c++) {
             let x = c * sz; let y = r * sz;
-            
+
             // Background color based on KB
             let color = "#c8c8c8";
             if (world.agent.hasFact('V', r, c)) color = "#c8dcff";
             if (world.agent.hasFact('OK', r, c)) color = "#96ff96";
             if (r === world.agent_x && c === world.agent_y) color = "#ffff64";
 
-            ctx.fillStyle = color;
-            ctx.fillRect(x, y, sz, sz);
-            ctx.strokeStyle = "#000";
-            ctx.strokeRect(x, y, sz, sz);
+            fill(color);
+            rect(x, y, sz, sz);
+            stroke(0);
+            strokeWeight(1);
+            noFill();
+            rect(x, y, sz, sz);
 
             // Real Content (Only if visible or visited)
             if (r === world.agent_x && c === world.agent_y) {
-                ctx.font = "20px sans-serif";
+                textSize(20);
+                textFont('sans-serif');
+                fill(0);
                 let items = world.grid[r][c];
-                if (items.includes('P')) ctx.fillText("PIT", x+5, y+25);
-                if (items.includes('W')) ctx.fillText("WUMP", x+5, y+45);
-                if (items.includes('G') && !world.has_gold) ctx.fillText("GOLD", x+5, y+65);
+                if (items.includes('P')) text("PIT", x+5, y+25);
+                if (items.includes('W')) text("WUMP", x+5, y+45);
+                if (items.includes('G') && !world.has_gold) text("GOLD", x+5, y+65);
             }
 
             // Show percepts for visited cells
             if (world.agent.hasFact('V', r, c)) {
                 let percepts = world.getPercepts(r, c);
                 if (percepts.size > 0) {
-                    ctx.font = "10px sans-serif";
-                    ctx.fillStyle = "#000000";
-                    ctx.fillText(Array.from(percepts).join(', '), x+5, y+sz-10);
+                    textSize(10);
+                    textFont('sans-serif');
+                    fill(0);
+                    text(Array.from(percepts).join(', '), x+5, y+sz-10);
                 }
             }
         }
     }
 
-    // Draw Agent Arrow
+    // Draw Agent Image
     let ax = world.agent_y * sz + 50;
     let ay = world.agent_x * sz + 50;
-    ctx.save();
-    ctx.translate(ax, ay);
-    ctx.rotate(world.direction * Math.PI / 2);
-    ctx.beginPath();
-    ctx.moveTo(15, 0); ctx.lineTo(-10, -10); ctx.lineTo(-10, 10); ctx.closePath();
-    ctx.fillStyle = "black";
-    ctx.fill();
-    ctx.restore();
+    image(agentImages[world.direction], ax - 25, ay - 25, 50, 50);
 }
 
 function manualAction(act) {

@@ -169,7 +169,7 @@ class WumpusWorld {
         this.agent_x = 3; this.agent_y = 0;
         this.direction = 0; this.arrows = 1; this.score = 0;
         this.alive = true; this.has_gold = false; this.wumpus_alive = true;
-        this.won = false; this.scream = false;
+        this.won = false; this.scream = false; this.exited = false;
 
         let positions = [];
         for(let r=0; r<4; r++) for(let c=0; c<4; c++) if(!(r===3 && c===0)) positions.push([r,c]);
@@ -189,6 +189,7 @@ class WumpusWorld {
         this.agent.resetState();
     }
 
+    /** * Returns the percepts (sensory inputs) for the agent at the given cell */
     getPercepts(r, c) {
         let p = new Set();
         if (this.grid[r][c].includes('G') && !this.has_gold) p.add('Glitter');
@@ -203,8 +204,9 @@ class WumpusWorld {
         return p;
     }
 
+    /** * Processes the agent's action, updates the world state, and returns new percepts and a message */
     processAction(action) {
-        if (!this.alive) return [new Set(), "Game Over"];
+        if (!this.alive || this.exited) return [new Set(), "Game Over"];
         this.scream = false;
         let msg = "Agent performed: " + action;
 
@@ -229,15 +231,40 @@ class WumpusWorld {
         }
         else if (action === 'Shoot') {
             if (this.arrows > 0) {
-                this.arrows--; this.score -= 10;
-                // Simplified shoot logic
-                msg = "Shot missed";
+                this.arrows--;
+                this.score -= 10;
+                let hit = false;
+                let r = this.agent_x, c = this.agent_y;
+                while (true) {
+                    // Move in shooting direction
+                    if (this.direction === 0) c++;      // right
+                    else if (this.direction === 1) r++; // down
+                    else if (this.direction === 2) c--; // left
+                    else if (this.direction === 3) r--; // up
+
+                    if (r < 0 || r >= 4 || c < 0 || c >= 4) break; // hit wall
+                    if (this.grid[r][c].includes('W')) {
+                        hit = true;
+                        break; // hit wumpus
+                    }
+                }
+                if (hit) {
+                    this.wumpus_alive = false;
+                    this.score += 1000;
+                    this.scream = true;
+                    msg = "Killed Wumpus!";
+                } else {
+                    msg = "Shot missed";
+                }
+            } else {
+                msg = "No arrows left";
             }
         }
         else if (action === 'Climb') {
             if (this.agent_x === 3 && this.agent_y === 0) {
+                this.exited = true;
                 if (this.has_gold) { this.score += 1000; this.won = true; }
-                this.alive = false; msg = "Climbed out!";
+                msg = "Climbed out!";
             }
         }
 
@@ -253,9 +280,13 @@ const ctx = canvas.getContext('2d');
 let world = new WumpusWorld();
 let autoplayInterval = null;
 
+/** * Updates the UI elements with current game state and logs messages */
 function updateUI(msg) {
     document.getElementById('score').innerText = `Score: ${world.score}`;
-    document.getElementById('status').innerText = `Status: ${world.alive ? (world.won ? "Winner!" : "Alive") : "Dead/Exited"}`;
+    let status = "Alive";
+    if (world.exited) status = world.won ? "Winner! Exited" : "Exited";
+    else if (!world.alive) status = "Dead";
+    document.getElementById('status').innerText = `Status: ${status}`;
     document.getElementById('wumpus-status').innerText = `Wumpus: ${world.wumpus_alive ? "Alive" : "Dead"}`;
     document.getElementById('gold-status').innerText = `Gold: ${world.has_gold ? "Yes" : "No"}`;
     document.getElementById('arrows').innerText = `Arrows: ${world.arrows}`;
@@ -271,6 +302,7 @@ function updateUI(msg) {
     draw();
 }
 
+/** * Renders the 4x4 grid cells with colors, symbols, content, and the agent */
 function draw() {
     ctx.clearRect(0, 0, 400, 400);
     const sz = 100;
@@ -290,12 +322,6 @@ function draw() {
             ctx.strokeStyle = "#000";
             ctx.strokeRect(x, y, sz, sz);
 
-            // Symbols
-            ctx.fillStyle = "#505050";
-            ctx.font = "12px sans-serif";
-            if (world.agent.hasFact('~W', r, c)) ctx.fillText("~W", x+5, y+sz-20);
-            if (world.agent.hasFact('~P', r, c)) ctx.fillText("~P", x+30, y+sz-20);
-
             // Real Content (Only if visible or visited)
             if (r === world.agent_x && c === world.agent_y) {
                 ctx.font = "20px sans-serif";
@@ -303,6 +329,16 @@ function draw() {
                 if (items.includes('P')) ctx.fillText("PIT", x+5, y+25);
                 if (items.includes('W')) ctx.fillText("WUMP", x+5, y+45);
                 if (items.includes('G') && !world.has_gold) ctx.fillText("GOLD", x+5, y+65);
+            }
+
+            // Show percepts for visited cells
+            if (world.agent.hasFact('V', r, c)) {
+                let percepts = world.getPercepts(r, c);
+                if (percepts.size > 0) {
+                    ctx.font = "10px sans-serif";
+                    ctx.fillStyle = "#000000";
+                    ctx.fillText(Array.from(percepts).join(', '), x+5, y+sz-10);
+                }
             }
         }
     }
@@ -321,7 +357,7 @@ function draw() {
 }
 
 function manualAction(act) {
-    if (!world.alive) return;
+    if (!world.alive || world.exited) return;
     let [p, msg] = world.processAction(act);
     world.agent.tellKB(p, world.agent_x, world.agent_y);
     world.agent.inferSafety();
@@ -345,7 +381,7 @@ function toggleAutoplay() {
     } else {
         document.getElementById('autoBtn').innerText = "Stop (A)";
         autoplayInterval = setInterval(() => {
-            if (!world.alive) { toggleAutoplay(); return; }
+            if (!world.alive || world.exited) { toggleAutoplay(); return; }
             let p = world.getPercepts(world.agent_x, world.agent_y);
             let act = world.agent.chooseAction(p);
             manualAction(act);
@@ -353,7 +389,7 @@ function toggleAutoplay() {
     }
 }
 
-// Key bindings
+// Event listener for keyboard controls
 window.addEventListener('keydown', e => {
     if (e.key === 'ArrowUp') manualAction('MoveForward');
     if (e.key === 'ArrowLeft') manualAction('TurnLeft');

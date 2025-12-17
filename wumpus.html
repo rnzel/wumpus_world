@@ -346,7 +346,7 @@ function draw() {
             if (world.agent.hasFact('V', r, c)) {
                 let items = world.grid[r][c];
                 if (items.includes('P')) image(pitImage, x + 25, y + 25, 50, 50);
-                if (items.includes('W')) image(wumpusImage, x + 25, y + 25, 50, 50);
+                if (items.includes('W')) image(wumpusImage, x + 5, y + 5, 90, 90);
                 if (items.includes('G') && !world.has_gold) image(goldImage, x + 25, y + 25, 50, 50);
             }
 

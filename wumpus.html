@@ -65,59 +65,121 @@ class WumpusAgent {
     }
 
     resetState() {
-        this.agent_x = 3;
-        this.agent_y = 0;
+        this.agent_x = 1;
+        this.agent_y = 1;
         this.direction = 0;
         this.has_gold = false;
         this.kb.clear();
-        this.addFact('V', 3, 0);
-        this.addFact('OK', 3, 0);
-        this.addFact('~P', 3, 0);
-        this.addFact('~W', 3, 0);
+        this.addFact('V', 1, 1);
+        this.addFact('~P', 1, 1);
+        this.addFact('~W', 1, 1);
+        this.addFact('OK', 1, 1);
     }
 
-    addFact(type, r, c) { this.kb.add(`${type},${r},${c}`); }
-    hasFact(type, r, c) { return this.kb.has(`${type},${r},${c}`); }
-    removeFact(type, r, c) { this.kb.delete(`${type},${r},${c}`); }
-
-    getNeighbors(r, c) {
-        let adj = [[r, c + 1], [r + 1, c], [r, c - 1], [r - 1, c]];
-        return adj.filter(([nr, nc]) => nr >= 0 && nr < 4 && nc >= 0 && nc < 4);
+    addFact(type, x, y) {
+        let symbol;
+        if (type.startsWith('~')) {
+            symbol = `$¬${type.charAt(1)}_{${x},${y}}$`;
+        } else {
+            symbol = `$${type}_{${x},${y}}$`;
+        }
+        this.kb.add(symbol);
     }
 
-    tellKB(percepts, r, c) {
-        this.agent_x = r; this.agent_y = c;
-        this.addFact('V', r, c);
-        
-        if (percepts.has('Breeze')) { this.addFact('B', r, c); this.removeFact('~B', r, c); }
-        else { this.addFact('~B', r, c); this.removeFact('B', r, c); }
+    hasFact(type, x, y) {
+        let symbol;
+        if (type.startsWith('~')) {
+            symbol = `$¬${type.charAt(1)}_{${x},${y}}$`;
+        } else {
+            symbol = `$${type}_{${x},${y}}$`;
+        }
+        return this.kb.has(symbol);
+    }
 
-        if (percepts.has('Stench')) { this.addFact('S', r, c); this.removeFact('~S', r, c); }
-        else { this.addFact('~S', r, c); this.removeFact('S', r, c); }
+    removeFact(type, x, y) {
+        let symbol;
+        if (type.startsWith('~')) {
+            symbol = `$¬${type.charAt(1)}_{${x},${y}}$`;
+        } else {
+            symbol = `$${type}_{${x},${y}}$`;
+        }
+        this.kb.delete(symbol);
+    }
 
-        if (percepts.has('Glitter')) this.addFact('G', r, c);
+    getNeighbors(x, y) {
+        let adj = [[x, y + 1], [x + 1, y], [x, y - 1], [x - 1, y]];
+        return adj.filter(([nx, ny]) => nx >= 1 && nx <= 4 && ny >= 1 && ny <= 4);
+    }
+
+    tellKB(percepts, x, y) {
+        this.agent_x = x; this.agent_y = y;
+        this.addFact('V', x, y);
+        this.addFact('OK', x, y);
+        let logs = [];
+
+        if (percepts.has('Breeze')) {
+            this.addFact('B', x, y); this.removeFact('~B', x, y);
+            logs.push('* Breeze detected → nearby cells may have pits');
+        }
+        else {
+            this.addFact('~B', x, y); this.removeFact('B', x, y);
+            logs.push('* No Breeze detected → nearby cells have no pits');
+        }
+
+        if (percepts.has('Stench')) {
+            this.addFact('S', x, y); this.removeFact('~S', x, y);
+            logs.push('* Stench detected → nearby cells may have the Wumpus');
+        }
+        else {
+            this.addFact('~S', x, y); this.removeFact('S', x, y);
+            logs.push('* No Stench detected → nearby cells have no Wumpus');
+        }
+
+        if (percepts.has('Glitter')) {
+            this.addFact('G', x, y);
+            logs.push('* Glitter detected at (' + x + ',' + y + ')');
+        }
+
+        return logs;
     }
 
     inferSafety() {
-        for (let r = 0; r < 4; r++) {
-            for (let c = 0; c < 4; c++) {
-                if (this.hasFact('V', r, c)) {
-                    let neighbors = this.getNeighbors(r, c);
-                    if (this.hasFact('~B', r, c)) neighbors.forEach(([nr, nc]) => this.addFact('~P', nr, nc));
-                    if (this.hasFact('~S', r, c)) neighbors.forEach(([nr, nc]) => this.addFact('~W', nr, nc));
+        let inferences = [];
+        for (let x = 1; x <= 4; x++) {
+            for (let y = 1; y <= 4; y++) {
+                if (this.hasFact('V', x, y)) {
+                    let neighbors = this.getNeighbors(x, y);
+                    if (this.hasFact('~B', x, y)) {
+                        neighbors.forEach(([nx, ny]) => {
+                            if (!this.hasFact('~P', nx, ny)) {
+                                this.addFact('~P', nx, ny);
+                            }
+                        });
+                    }
+                    if (this.hasFact('~S', x, y)) {
+                        neighbors.forEach(([nx, ny]) => {
+                            if (!this.hasFact('~W', nx, ny)) {
+                                this.addFact('~W', nx, ny);
+                            }
+                        });
+                    }
                 }
             }
         }
-        for (let r = 0; r < 4; r++) {
-            for (let c = 0; c < 4; c++) {
-                if (this.hasFact('~P', r, c) && this.hasFact('~W', r, c)) this.addFact('OK', r, c);
+        for (let x = 1; x <= 4; x++) {
+            for (let y = 1; y <= 4; y++) {
+                if (this.hasFact('~P', x, y) && this.hasFact('~W', x, y) && !this.hasFact('OK', x, y)) {
+                    this.addFact('OK', x, y);
+                    inferences.push(`* Cell (${x},${y}) inferred as SAFE`);
+                }
             }
         }
+        return inferences;
     }
 
     chooseAction(percepts) {
         if (percepts.has('Glitter')) { this.has_gold = true; return 'Grab'; }
-        if (this.has_gold && this.agent_x === 3 && this.agent_y === 0) return 'Climb';
+        if (this.has_gold && this.agent_x === 1 && this.agent_y === 1) return 'Climb';
 
         // Find safe unvisited
         let neighbors = this.getNeighbors(this.agent_x, this.agent_y);
@@ -132,7 +194,7 @@ class WumpusAgent {
             // Path back to start
             let safeVisited = neighbors.filter(([nr, nc]) => this.hasFact('OK', nr, nc));
             if (safeVisited.length > 0) {
-                target = safeVisited.sort((a, b) => (Math.abs(a[0]-3)+a[1]) - (Math.abs(b[0]-3)+b[1]))[0];
+                target = safeVisited.sort((a, b) => (Math.abs(a[0]-1) + Math.abs(a[1]-1)) - (Math.abs(b[0]-1) + Math.abs(b[1]-1)))[0];
             }
         }
 
@@ -140,10 +202,10 @@ class WumpusAgent {
             let [tr, tc] = target;
             let dr = tr - this.agent_x, dc = tc - this.agent_y;
             let targetDir = -1;
-            if (dr === -1 && dc === 0) targetDir = 3;
-            else if (dr === 1 && dc === 0) targetDir = 1;
-            else if (dr === 0 && dc === 1) targetDir = 0;
-            else if (dr === 0 && dc === -1) targetDir = 2;
+            if (dr === -1 && dc === 0) targetDir = 3; // up
+            else if (dr === 1 && dc === 0) targetDir = 1; // down
+            else if (dr === 0 && dc === 1) targetDir = 0; // right
+            else if (dr === 0 && dc === -1) targetDir = 2; // left
 
             let diff = (targetDir - this.direction + 4) % 4;
             if (diff === 0) return 'MoveForward';
@@ -152,7 +214,7 @@ class WumpusAgent {
             return 'TurnRight';
         }
 
-        return 'TurnLeft'; 
+        return 'TurnLeft';
     }
 }
 
@@ -167,36 +229,38 @@ class WumpusWorld {
     setupWorld() {
         // Initialize empty 4x4 grid
         this.grid = Array.from({ length: 4 }, () => Array.from({ length: 4 }, () => []));
-        this.agent_x = 3; this.agent_y = 0;
+        this.agent_x = 1; this.agent_y = 1;
         this.direction = 0; this.arrows = 1; this.score = 0;
         this.alive = true; this.has_gold = false; this.wumpus_alive = true;
         this.won = false; this.scream = false; this.exited = false;
 
         let positions = [];
-        for(let r=0; r<4; r++) for(let c=0; c<4; c++) if(!(r===3 && c===0)) positions.push([r,c]);
+        for(let y=1; y<=4; y++) for(let x=1; x<=4; x++) if(!(x===1 && y===1)) positions.push([x,y]);
 
         // Pits
         positions = positions.filter(p => {
-            if (Math.random() < 0.2) { this.grid[p[0]][p[1]].push('P'); return false; }
+            if (Math.random() < 0.2) { let [px,py] = p; let r=4-py; let c=px-1; this.grid[r][c].push('P'); return false; }
             return true;
         });
         // Wumpus
         let wPos = positions.splice(Math.floor(Math.random()*positions.length), 1)[0];
-        this.grid[wPos[0]][wPos[1]].push('W');
+        let [wx,wy] = wPos; let wr=4-wy; let wc=wx-1; this.grid[wr][wc].push('W');
         // Gold
         let gPos = positions.splice(Math.floor(Math.random()*positions.length), 1)[0];
-        this.grid[gPos[0]][gPos[1]].push('G');
+        let [gx,gy] = gPos; let gr=4-gy; let gc=gx-1; this.grid[gr][gc].push('G');
 
         this.agent.resetState();
     }
 
     /** * Returns the percepts (sensory inputs) for the agent at the given cell */
-    getPercepts(r, c) {
+    getPercepts(x, y) {
+        let r = 4 - y; let c = x - 1;
         let p = new Set();
         if (this.grid[r][c].includes('G') && !this.has_gold) p.add('Glitter');
-        let adj = [[r, c+1], [r+1, c], [r, c-1], [r-1, c]];
-        adj.forEach(([nr, nc]) => {
-            if (nr>=0 && nr<4 && nc>=0 && nc<4) {
+        let adj = [[x, y+1], [x+1, y], [x, y-1], [x-1, y]];
+        adj.forEach(([nx, ny]) => {
+            if (nx>=1 && nx<=4 && ny>=1 && ny<=4) {
+                let nr = 4 - ny; let nc = nx - 1;
                 if (this.grid[nr][nc].includes('P')) p.add('Breeze');
                 if (this.grid[nr][nc].includes('W') && this.wumpus_alive) p.add('Stench');
             }
@@ -212,20 +276,22 @@ class WumpusWorld {
         let msg = "Agent performed: " + action;
 
         if (action === 'MoveForward') {
-            let dr = [0, 1, 0, -1][this.direction];
-            let dc = [1, 0, -1, 0][this.direction];
-            let nr = this.agent_x + dr, nc = this.agent_y + dc;
-            if (nr>=0 && nr<4 && nc>=0 && nc<4) {
-                this.agent_x = nr; this.agent_y = nc;
-                this.agent.agent_x = nr; this.agent.agent_y = nc;
-                if (this.grid[nr][nc].includes('P')) { this.alive = false; this.score -= 1000; msg = "Fell into Pit!"; }
-                else if (this.grid[nr][nc].includes('W') && this.wumpus_alive) { this.alive = false; this.score -= 1000; msg = "Eaten by Wumpus!"; }
+            let dx = [1, 0, -1, 0][this.direction];
+            let dy = [0, -1, 0, 1][this.direction];
+            let nx = this.agent_x + dx, ny = this.agent_y + dy;
+            if (nx>=1 && nx<=4 && ny>=1 && ny<=4) {
+                this.agent_x = nx; this.agent_y = ny;
+                this.agent.agent_x = nx; this.agent.agent_y = ny;
+                let r = 4 - ny; let c = nx - 1;
+                if (this.grid[r][c].includes('P')) { this.alive = false; this.score -= 1000; msg = "Agent fell into a Pit -> died"; }
+                else if (this.grid[r][c].includes('W') && this.wumpus_alive) { this.alive = false; this.score -= 1000; msg = "Agent eaten by Wumpus -> died"; }
             } else msg = "Bumped into wall";
-        } 
+        }
         else if (action === 'TurnLeft') { this.direction = (this.direction + 3) % 4; this.agent.direction = this.direction; }
         else if (action === 'TurnRight') { this.direction = (this.direction + 1) % 4; this.agent.direction = this.direction; }
         else if (action === 'Grab') {
-            if (this.grid[this.agent_x][this.agent_y].includes('G')) {
+            let r = 4 - this.agent_y; let c = this.agent_x - 1;
+            if (this.grid[r][c].includes('G')) {
                 this.has_gold = true; this.agent.has_gold = true;
                 msg = "Grabbed Gold!";
             }
@@ -235,15 +301,16 @@ class WumpusWorld {
                 this.arrows--;
                 this.score -= 10;
                 let hit = false;
-                let r = this.agent_x, c = this.agent_y;
+                let x = this.agent_x, y = this.agent_y;
                 while (true) {
                     // Move in shooting direction
-                    if (this.direction === 0) c++;      // right
-                    else if (this.direction === 1) r++; // down
-                    else if (this.direction === 2) c--; // left
-                    else if (this.direction === 3) r--; // up
+                    if (this.direction === 0) x++; // right
+                    else if (this.direction === 1) y--; // down
+                    else if (this.direction === 2) x--; // left
+                    else if (this.direction === 3) y++; // up
 
-                    if (r < 0 || r >= 4 || c < 0 || c >= 4) break; // hit wall
+                    if (x < 1 || x > 4 || y < 1 || y > 4) break; // hit wall
+                    let r = 4 - y; let c = x - 1;
                     if (this.grid[r][c].includes('W')) {
                         hit = true;
                         break; // hit wumpus
@@ -262,7 +329,7 @@ class WumpusWorld {
             }
         }
         else if (action === 'Climb') {
-            if (this.agent_x === 3 && this.agent_y === 0) {
+            if (this.agent_x === 1 && this.agent_y === 1) {
                 this.exited = true;
                 if (this.has_gold) { this.score += 1000; this.won = true; }
                 msg = "Climbed out!";
@@ -299,7 +366,7 @@ function setup() {
 }
 
 /** * Updates the UI elements with current game state and logs messages */
-function updateUI(msg) {
+function updateUI(msg, inferences = []) {
     document.getElementById('score').innerText = `Score: ${world.score}`;
     let status = "Alive";
     if (world.exited) status = world.won ? "Winner! Exited" : "Exited";
@@ -312,9 +379,14 @@ function updateUI(msg) {
     let p = world.getPercepts(world.agent_x, world.agent_y);
     document.getElementById('percepts').innerText = `Percepts: ${Array.from(p).join(', ') || 'None'}`;
 
+    let log = document.getElementById('log');
     if (msg) {
-        let log = document.getElementById('log');
         log.innerHTML += `<br>> ${msg}`;
+    }
+    if (inferences && inferences.length > 0) {
+        inferences.forEach(inf => log.innerHTML += `<br>> ${inf}`);
+    }
+    if (msg || inferences.length > 0) {
         log.scrollTop = log.scrollHeight;
     }
     redraw();
@@ -325,65 +397,69 @@ function draw() {
     background('#c8c8c8');
     const sz = 100;
 
-    for (let r = 0; r < 4; r++) {
-        for (let c = 0; c < 4; c++) {
-            let x = c * sz; let y = r * sz;
+    for (let y_coord = 4; y_coord >= 1; y_coord--) {
+        for (let x_coord = 1; x_coord <= 4; x_coord++) {
+            let r = 4 - y_coord;
+            let c = x_coord - 1;
+            let px = c * sz;
+            let py = r * sz;
 
             // Background color based on KB
             let color = "#c8c8c8";
-            if (world.agent.hasFact('V', r, c)) color = "#c8dcff";
-            if (world.agent.hasFact('OK', r, c)) color = "#96ff96";
-            if (r === world.agent_x && c === world.agent_y) color = "#ffff64";
+            if (world.agent.hasFact('V', x_coord, y_coord)) color = "#c8dcff";
+            if (world.agent.hasFact('OK', x_coord, y_coord)) color = "#96ff96";
+            if (x_coord === world.agent_x && y_coord === world.agent_y) color = "#ffff64";
 
             fill(color);
-            rect(x, y, sz, sz);
+            rect(px, py, sz, sz);
             stroke(0);
             strokeWeight(1);
             noFill();
-            rect(x, y, sz, sz);
+            rect(px, py, sz, sz);
 
             // Real Content (for visited cells)
-            if (world.agent.hasFact('V', r, c)) {
+            if (world.agent.hasFact('V', x_coord, y_coord)) {
                 let items = world.grid[r][c];
-                if (items.includes('P')) image(pitImage, x + 25, y + 25, 50, 50);
-                if (items.includes('W')) image(wumpusImage, x + 5, y + 5, 90, 90);
-                if (items.includes('G') && !world.has_gold) image(goldImage, x + 25, y + 25, 50, 50);
+                if (items.includes('P')) image(pitImage, px + 25, py + 25, 50, 50);
+                if (items.includes('W')) image(wumpusImage, px + 5, py + 5, 90, 90);
+                if (items.includes('G') && !world.has_gold) image(goldImage, px + 25, py + 25, 50, 50);
             }
 
             // Show percepts for visited cells
-            if (world.agent.hasFact('V', r, c)) {
-                let percepts = world.getPercepts(r, c);
+            if (world.agent.hasFact('V', x_coord, y_coord)) {
+                let percepts = world.getPercepts(x_coord, y_coord);
                 if (percepts.size > 0) {
                     textSize(10);
                     textFont('sans-serif');
                     fill(0);
-                    text(Array.from(percepts).join(', '), x+5, y+sz-10);
+                    text(Array.from(percepts).join(', '), px+5, py+sz-10);
                 }
             }
         }
     }
 
     // Draw Agent Image
-    let ax = world.agent_y * sz + 50;
-    let ay = world.agent_x * sz + 50;
+    let ax = (world.agent_x - 1) * sz + 50;
+    let ay = (4 - world.agent_y) * sz + 50;
     image(agentImages[world.direction], ax - 25, ay - 25, 50, 50);
 }
 
 function manualAction(act) {
     if (!world.alive || world.exited) return;
     let [p, msg] = world.processAction(act);
-    world.agent.tellKB(p, world.agent_x, world.agent_y);
-    world.agent.inferSafety();
-    updateUI(msg);
+    let perceptLogs = world.agent.tellKB(p, world.agent_x, world.agent_y);
+    let inferences = world.agent.inferSafety();
+    let allLogs = perceptLogs.concat(inferences);
+    updateUI(msg, allLogs);
 }
 
 function resetGame() {
     world.setupWorld();
     document.getElementById('log').innerHTML = "--- NEW WORLD GENERATED ---";
     let p = world.getPercepts(world.agent_x, world.agent_y);
-    world.agent.tellKB(p, world.agent_x, world.agent_y);
-    world.agent.inferSafety();
-    updateUI();
+    let perceptLogs = world.agent.tellKB(p, world.agent_x, world.agent_y);
+    let inferences = world.agent.inferSafety();
+    updateUI(null, perceptLogs.concat(inferences));
 }
 
 function toggleAutoplay() {
